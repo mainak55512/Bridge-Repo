@@ -1,0 +1,217 @@
+#include "l2.h"
+#include "log.h"
+#include "net.h"
+#include "net_builtin.h"
+#include "printf.h"
+#include "util.h"
+
+#if MG_ENABLE_TCPIP
+
+#if defined(__DCC__)
+#pragma pack(1)
+#else
+#pragma pack(push, 1)
+#endif
+
+struct eth {
+  uint8_t dst[6];  // Destination MAC address
+  uint8_t src[6];  // Source MAC address
+  uint16_t type;   // Ethernet type
+};
+
+struct qtag {
+  uint16_t tpid;  // Ethernet 802.1Q type
+  uint16_t tci;   // PCP, DEI, VLAN id
+#define VLAN_ID(x) ((uint16_t) ((x) &0x0FFF))
+};
+
+#if defined(__DCC__)
+#pragma pack(0)
+#else
+#pragma pack(pop)
+#endif
+
+static const uint16_t eth_types[] = {
+    // order is vital, see l2.h
+    0x800,   // IPv4
+    0x86dd,  // IPv6
+    0x806,   // ARP
+    0x8863,  // PPPoE Discovery Stage
+    0x8864   // PPPoE Session Stage
+};
+
+void mg_l2_eth_init(struct mg_tcpip_if *ifp) {
+  struct mg_l2addr *l2addr = (struct mg_l2addr *) ifp->mac;
+  // If MAC is not set, make a random one
+  if (l2addr->addr.mac[0] == 0 && l2addr->addr.mac[1] == 0 &&
+      l2addr->addr.mac[2] == 0 && l2addr->addr.mac[3] == 0 &&
+      l2addr->addr.mac[4] == 0 && l2addr->addr.mac[5] == 0) {
+    l2addr->addr.mac[0] = 0x02;  // Locally administered, unicast
+    mg_random(&l2addr->addr.mac[1], sizeof(l2addr->addr.mac) - 1);
+    MG_INFO(
+        ("MAC not set. Generated random: %M", mg_print_mac, l2addr->addr.mac));
+  }
+  ifp->l2mtu = 1500;
+  ifp->framesize = 1540;
+}
+
+bool mg_l2_eth_poll(struct mg_tcpip_if *ifp, bool expired_1000ms) {
+  (void) ifp;
+  (void) expired_1000ms;
+  return true;
+}
+
+uint8_t *mg_l2_eth_header(struct mg_tcpip_if *ifp, enum mg_l2proto proto,
+                          struct mg_l2addr *src, struct mg_l2addr *dst,
+                          uint8_t *frame) {
+  struct eth_data *d = &ifp->l2data.eth;
+  struct eth *eth = (struct eth *) frame;
+  uint8_t *hlp;
+  hlp = (uint8_t *) (eth + 1);
+  memcpy(eth->src, src->addr.mac, sizeof(eth->dst));
+  memcpy(eth->dst, dst->addr.mac, sizeof(eth->dst));
+  if (d->vlan_id == 0) {  // Traditional plain frame
+    eth->type = mg_htons(eth_types[(unsigned int) proto]);
+  } else {  // Add 802.1Q tag
+    struct qtag *qtag = (struct qtag *) &eth->type;
+    qtag->tpid = mg_htons(0x8100);
+    qtag->tci = mg_htons(d->vlan_id);  // PCP = default (best-effort)
+    hlp += sizeof(*qtag);
+    MG_STORE_BE16(qtag + 1, eth_types[(unsigned int) proto]);
+  }
+  return hlp;
+}
+
+size_t mg_l2_eth_trailer(struct mg_tcpip_if *ifp, size_t len, uint8_t *cur) {
+  struct eth_data *d = &ifp->l2data.eth;
+  // there is no len field in Ethernet, CRC is hw-calculated; pad to 64 - CRC
+  size_t ethlen =
+      len + sizeof(struct eth) + (d->vlan_id != 0 ? sizeof(struct qtag) : 0);
+  (void) cur;
+  return ethlen >= 60 ? ethlen : 60;
+}
+
+struct mg_l2addr *mg_l2_eth_mapip(enum mg_l2addrtype addrtype,
+                                  struct mg_addr *addr);
+
+// Read an unaligned little-endian value from byte pointer p into a native integer.
+// Safe on architectures that forbid unaligned access (e.g. Cortex-M0).
+#define MG_LOAD_LE32(p)                           \
+  ((uint32_t) (((uint32_t) MG_U8P(p)[3] << 24U) | \
+               ((uint32_t) MG_U8P(p)[2] << 16U) | \
+               ((uint32_t) MG_U8P(p)[1] << 8U) | MG_U8P(p)[0]))
+
+bool mg_l2_eth_rx(struct mg_tcpip_if *ifp, enum mg_l2proto *proto,
+                  struct mg_str *pay, struct mg_str *raw) {
+  struct eth *eth = (struct eth *) raw->buf;
+  struct eth_data *d = &ifp->l2data.eth;
+  uint16_t type, len;
+  unsigned int i;
+  size_t hdrlen =
+      sizeof(struct eth) + (d->vlan_id != 0 ? sizeof(struct qtag) : 0);
+  if (raw->len < hdrlen) return false;  // Truncated - runt?
+  len = (uint16_t) raw->len;
+  if (d->vlan_id == 0) {  // We don't handle VLANs
+    type = mg_ntohs(eth->type);
+  } else {  // We do, check 802.1Q tag
+    struct qtag *qtag = (struct qtag *) &eth->type;
+    if (qtag->tpid != mg_htons(0x8100)) return false;  // Untagged frame
+    if (VLAN_ID(mg_ntohs(qtag->tci)) != VLAN_ID(d->vlan_id))
+      return false;  // Not our VLAN
+    type = MG_LOAD_BE16(qtag + 1);
+  }
+  if (ifp->enable_mac_check &&
+      memcmp(eth->dst, ifp->mac, sizeof(eth->dst)) != 0 &&
+      memcmp(eth->dst, mg_l2_eth_mapip(MG_TCPIP_L2ADDR_BCAST, NULL),
+             sizeof(eth->dst)) != 0)
+    return false;  // TODO(): add multicast addresses
+  if (ifp->enable_fcs_check && len > hdrlen + 4) {
+    uint32_t crc, crc_rx;
+    len -= 4;
+    crc = mg_crc32(0, (const char *) raw->buf, len);
+    crc_rx = MG_LOAD_LE32(raw->buf + len);
+    if (crc_rx != crc)
+      return false;
+  }
+  pay->buf = ((char *) eth) + hdrlen;
+  pay->len = len - hdrlen;
+  for (i = 0; i < sizeof(eth_types) / sizeof(uint16_t); i++) {
+    if (type == eth_types[i]) break;
+  }
+  if (i == sizeof(eth_types) / sizeof(eth_types[0])) {
+    MG_DEBUG(("Unknown eth type %x", type));
+    if (mg_log_level >= MG_LL_VERBOSE)
+      mg_hexdump(raw->buf, raw->len >= 32 ? 32 : raw->len);
+    return false;
+  }
+  *proto = (enum mg_l2proto) i;
+  return true;
+}
+
+struct mg_l2addr *mg_l2_eth_getaddr(struct mg_tcpip_if *ifp, uint8_t *frame) {
+  struct eth *eth = (struct eth *) frame; 
+  (void) ifp; // address field is before a possible 802.1Q tag
+  return (struct mg_l2addr *) &eth->src;
+}
+
+extern struct mg_l2addr s_mapip;
+
+struct mg_l2addr *mg_l2_eth_mapip(enum mg_l2addrtype addrtype,
+                                  struct mg_addr *addr) {
+  switch (addrtype) {
+    case MG_TCPIP_L2ADDR_BCAST:
+      memset(s_mapip.addr.mac, 0xff, sizeof(s_mapip.addr.mac));
+      break;
+    case MG_TCPIP_L2ADDR_MCAST: {
+      uint8_t *ip = (uint8_t *) &addr->addr.ip4;
+      // IP multicast group MAC, RFC-1112 6.4
+      s_mapip.addr.mac[0] = 0x01, s_mapip.addr.mac[1] = 0x00,
+      s_mapip.addr.mac[2] = 0x5E;
+      s_mapip.addr.mac[3] = ip[1] & 0x7F;  // 23 LSb
+      s_mapip.addr.mac[4] = ip[2];
+      s_mapip.addr.mac[5] = ip[3];
+      break;
+    }
+    case MG_TCPIP_L2ADDR_MCAST6: {
+      // IPv6 multicast address mapping, RFC-2464 7
+      uint8_t *ip = (uint8_t *) &addr->addr.ip6;
+      s_mapip.addr.mac[0] = 0x33, s_mapip.addr.mac[1] = 0x33;
+      s_mapip.addr.mac[2] = ip[12], s_mapip.addr.mac[3] = ip[13],
+      s_mapip.addr.mac[4] = ip[14], s_mapip.addr.mac[5] = ip[15];
+      break;
+    }
+  }
+  return &s_mapip;
+}
+
+#if MG_ENABLE_IPV6
+static void meui64(uint8_t *addr, uint8_t *mac) {
+  *addr++ = *mac++ ^ (uint8_t) 0x02, *addr++ = *mac++, *addr++ = *mac++;
+  *addr++ = 0xff, *addr++ = 0xfe;
+  *addr++ = *mac++, *addr++ = *mac++, *addr = *mac;
+}
+
+bool mg_l2_eth_genip6(uint64_t *ip6, uint8_t prefix_len,
+                      struct mg_l2addr *l2addr) {
+  if (prefix_len > 64) {
+    MG_ERROR(("Prefix length > 64, UNSUPPORTED"));
+    return false;
+  }
+  ip6[0] = 0;
+  meui64(((uint8_t *) &ip6[1]), l2addr->addr.mac);  // RFC-4291 2.5.4, 2.5.1
+  return true;
+}
+
+bool mg_l2_eth_ip6get(struct mg_l2addr *l2addr, uint8_t *opts, uint8_t len) {
+  if (len != 1) return false;
+  memcpy(l2addr->addr.mac, opts, 6);
+  return true;
+}
+
+uint8_t mg_l2_eth_ip6put(struct mg_l2addr *l2addr, uint8_t *opts) {
+  memcpy(opts, l2addr->addr.mac, 6);
+  return 1;
+}
+#endif
+
+#endif

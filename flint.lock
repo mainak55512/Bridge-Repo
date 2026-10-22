@@ -1,0 +1,22 @@
+{
+    "container": {
+        "version": "v0.1.2",
+        "remote": "https://github.com/mainak55512/container",
+        "hash": "a2583f9eeeadb6f3cfa2284ea1d31ef82ae62622"
+    },
+    "CString": {
+        "version": "unknown",
+        "remote": "https://github.com/mainak55512/CString",
+        "hash": "9851014a53c3be4377947453a560923731845eae"
+    },
+    "mongoose": {
+        "version": "7.23",
+        "remote": "https://github.com/cesanta/mongoose.git",
+        "hash": "02bdbb9ed6f0a8f7c42228c6e7cb35d748b60551"
+    },
+    "arena": {
+        "version": "v0.1.1",
+        "remote": "https://github.com/mainak55512/arena",
+        "hash": "b1659723d4d45a7eba5a8b12648a22f0212da17e"
+    }
+}

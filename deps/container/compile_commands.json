@@ -1,0 +1,7 @@
+[
+    {
+        "directory": "/home/mainak/programs/C_Container",
+        "file": "lib/cvector.c",
+        "command": "gcc -c lib/cvector.c -Iinclude -o lib/cvector.c.o"
+    }
+]

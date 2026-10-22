@@ -1,0 +1,3 @@
+#define MG_ARCH MG_ARCH_ZEPHYR
+
+#define MG_TLS MG_TLS_MBED
