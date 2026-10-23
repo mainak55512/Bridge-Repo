@@ -1,13 +1,18 @@
 {
+    "CString": {
+        "version": "unknown",
+        "remote": "https://github.com/mainak55512/CString",
+        "hash": "9851014a53c3be4377947453a560923731845eae"
+    },
     "container": {
         "version": "v0.1.2",
         "remote": "https://github.com/mainak55512/container",
         "hash": "a2583f9eeeadb6f3cfa2284ea1d31ef82ae62622"
     },
-    "CString": {
-        "version": "unknown",
-        "remote": "https://github.com/mainak55512/CString",
-        "hash": "9851014a53c3be4377947453a560923731845eae"
+    "yyjson": {
+        "version": "0.12.0",
+        "remote": "https://github.com/ibireme/yyjson",
+        "hash": "8b4a38dc994a110abaec8a400615567bd996105f"
     },
     "mongoose": {
         "version": "7.23",

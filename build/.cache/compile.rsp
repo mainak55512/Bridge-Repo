@@ -8,6 +8,8 @@
 "-I./deps/CString/include"
 "-I./deps/container/include"
 "-I./deps/mongoose"
+"-I./deps/yyjson/src"
 -O3
 -Wall
 -DMG_TLS=MG_TLS_BUILTIN
+-DMG_ENABLE_LOG=0

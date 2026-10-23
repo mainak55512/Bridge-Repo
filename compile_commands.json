@@ -2,26 +2,31 @@
     {
         "directory": "/home/mainak/programs/c_test",
         "file": "src/main.c",
-        "command": "gcc -c src/main.c -Iinclude -Ideps/arena/include -Ideps/CString/include -Ideps/container/include -Ideps/mongoose -o src/main.c.o"
+        "command": "gcc -c src/main.c -Iinclude -Ideps/arena/include -Ideps/CString/include -Ideps/container/include -Ideps/mongoose -Ideps/yyjson/src -o src/main.c.o"
     },
     {
         "directory": "/home/mainak/programs/c_test",
         "file": "deps/arena/lib/arena.c",
-        "command": "gcc -c deps/arena/lib/arena.c -Iinclude -Ideps/arena/include -Ideps/CString/include -Ideps/container/include -Ideps/mongoose -o deps/arena/lib/arena.c.o"
+        "command": "gcc -c deps/arena/lib/arena.c -Iinclude -Ideps/arena/include -Ideps/CString/include -Ideps/container/include -Ideps/mongoose -Ideps/yyjson/src -o deps/arena/lib/arena.c.o"
     },
     {
         "directory": "/home/mainak/programs/c_test",
         "file": "deps/CString/lib/cstring.c",
-        "command": "gcc -c deps/CString/lib/cstring.c -Iinclude -Ideps/arena/include -Ideps/CString/include -Ideps/container/include -Ideps/mongoose -o deps/CString/lib/cstring.c.o"
+        "command": "gcc -c deps/CString/lib/cstring.c -Iinclude -Ideps/arena/include -Ideps/CString/include -Ideps/container/include -Ideps/mongoose -Ideps/yyjson/src -o deps/CString/lib/cstring.c.o"
     },
     {
         "directory": "/home/mainak/programs/c_test",
         "file": "deps/container/lib/cvector.c",
-        "command": "gcc -c deps/container/lib/cvector.c -Iinclude -Ideps/arena/include -Ideps/CString/include -Ideps/container/include -Ideps/mongoose -o deps/container/lib/cvector.c.o"
+        "command": "gcc -c deps/container/lib/cvector.c -Iinclude -Ideps/arena/include -Ideps/CString/include -Ideps/container/include -Ideps/mongoose -Ideps/yyjson/src -o deps/container/lib/cvector.c.o"
     },
     {
         "directory": "/home/mainak/programs/c_test",
         "file": "deps/mongoose/mongoose.c",
-        "command": "gcc -c deps/mongoose/mongoose.c -Iinclude -Ideps/arena/include -Ideps/CString/include -Ideps/container/include -Ideps/mongoose -o deps/mongoose/mongoose.c.o"
+        "command": "gcc -c deps/mongoose/mongoose.c -Iinclude -Ideps/arena/include -Ideps/CString/include -Ideps/container/include -Ideps/mongoose -Ideps/yyjson/src -o deps/mongoose/mongoose.c.o"
+    },
+    {
+        "directory": "/home/mainak/programs/c_test",
+        "file": "deps/yyjson/src/yyjson.c",
+        "command": "gcc -c deps/yyjson/src/yyjson.c -Iinclude -Ideps/arena/include -Ideps/CString/include -Ideps/container/include -Ideps/mongoose -Ideps/yyjson/src -o deps/yyjson/src/yyjson.c.o"
     }
 ]

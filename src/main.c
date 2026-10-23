@@ -3,24 +3,30 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <time.h>
+#include <yyjson.h>
+
+struct http_request_ctx {
+  const char *url;
+  bool done;
+  int status_code;
+  char *response_body;
+  size_t response_len;
+  Arena *arena;
+};
 
 static bool s_done = false;
 
 static void fn(struct mg_connection *c, int ev, void *ev_data) {
+  struct http_request_ctx *ctx = (struct http_request_ctx *)c->fn_data;
   if (ev == MG_EV_CONNECT) {
-    const char *url = (const char *)c->fn_data;
+    const char *url = (const char *)ctx->url;
     struct mg_str host = mg_url_host(url);
 
-    // Initialize TLS if connecting via HTTPS
     if (mg_url_is_ssl(url)) {
-      struct mg_tls_opts opts = {
-          .name = host,
-          .skip_verification = true // Set to false if passing a CA certificate
-      };
+      struct mg_tls_opts opts = {.name = host, .skip_verification = true};
       mg_tls_init(c, &opts);
     }
 
-    // Send HTTP GET request
     mg_printf(c,
               "GET %s HTTP/1.1\r\n"
               "Host: %.*s\r\n"
@@ -32,15 +38,25 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
   } else if (ev == MG_EV_HTTP_MSG) {
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
 
+    ctx->status_code = mg_http_status(hm);
+    ctx->response_len = hm->body.len;
+    ctx->response_body = (char *)arena_alloc(ctx->arena, hm->body.len + 1);
+
+    if (ctx->response_body != NULL) {
+      memcpy(ctx->response_body, hm->body.buf, hm->body.len);
+      ctx->response_body[hm->body.len] = '\0';
+    }
+
     printf("HTTP Status: %d\n", mg_http_status(hm));
     printf("Body (%.*s):\n%.*s\n", (int)hm->body.len, "bytes",
            (int)hm->body.len, hm->body.buf);
 
     c->is_closing = 1;
-    s_done = true;
-
+    // s_done = true;
+    ctx->done = true;
   } else if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
-    s_done = true;
+    // s_done = true;
+    ctx->done = true;
   }
 }
 
@@ -59,14 +75,45 @@ int main(void) {
 
   mg_mgr_init(&mgr);
 
-  if (mg_http_connect(&mgr, url, fn, (void *)url) == NULL) {
+  struct http_request_ctx ctx = {.url = url,
+                                 .done = false,
+                                 .status_code = 0,
+                                 .response_body = NULL,
+                                 .response_len = 0,
+                                 .arena = arena};
+
+  if (mg_http_connect(&mgr, ctx.url, fn, &ctx) == NULL) {
     fprintf(stderr, "Failed to initiate connection\n");
     mg_mgr_free(&mgr);
+    arena_free(&arena);
     return 1;
   }
 
-  while (!s_done) {
+  while (!ctx.done) {
     mg_mgr_poll(&mgr, 50);
+  }
+
+  // --- Access the received data here ---
+  if (ctx.response_body != NULL) {
+    printf("Received HTTP Status: %d\n", ctx.status_code);
+    printf("Received %zu bytes:\n%s\n", ctx.response_len, ctx.response_body);
+
+    yyjson_doc *doc = yyjson_read(ctx.response_body, ctx.response_len, 0);
+
+    if (!doc) {
+      fprintf(stderr, "Failed to parse JSON\n");
+      return 1;
+    }
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    yyjson_val *dependency = yyjson_obj_get(root, "raylib");
+    yyjson_val *remote = yyjson_obj_get(dependency, "remote");
+
+    printf("Remote: %s\n", yyjson_get_str(remote));
+
+    yyjson_doc_free(doc);
+
+  } else {
+    printf("Request failed or no body received. Status: %d\n", ctx.status_code);
   }
 
   mg_mgr_free(&mgr);
